@@ -105,7 +105,7 @@ namespace Scenoco
             failedAt = Progress;
             seenTime = info.LastWriteTimeUtc;
             seenLength = info.Length;
-            var text = File.ReadAllText(TextPath);
+            var text = ReadText();
             if (state != null && text == state.text)
             {
                 if (Status != TwinStatus.Synced) Set(TwinStatus.Synced, "in step");
@@ -198,7 +198,7 @@ namespace Scenoco
                     Bootstrap(asset, objects);
                     return;
                 }
-                var text = File.ReadAllText(TextPath);
+                var text = ReadText();
                 if (text != state.text)
                 {
                     if (ConflictMarkers.In(text)) return;
@@ -237,7 +237,7 @@ namespace Scenoco
 
         string Resolve(LoadedAsset asset, Resolution choice, bool openEditor)
         {
-            var text = File.ReadAllText(TextPath);
+            var text = ReadText();
             var objects = asset.Objects();
             var mine = SceneDiff.Diff(BaseExport(), Export(asset, objects));
             var ours = BaseText();
@@ -374,9 +374,22 @@ namespace Scenoco
 
         // --- reporting -------------------------------------------------------------------------------
 
+        /// <summary>
+        /// The text file, with its line endings as "\n": Git on Windows checks text out with "\r\n". Which
+        /// ones the file has is kept, and a write puts them back, so a checkout never reads as an edit.
+        /// </summary>
+        string ReadText()
+        {
+            var raw = File.ReadAllText(TextPath);
+            windowsLines = raw.Contains("\r\n");
+            return windowsLines ? raw.Replace("\r\n", "\n") : raw;
+        }
+
+        bool windowsLines;
+
         void WriteFile(string text)
         {
-            File.WriteAllText(TextPath, text);
+            File.WriteAllText(TextPath, windowsLines ? text.Replace("\r\n", "\n").Replace("\n", "\r\n") : text);
             var info = new FileInfo(TextPath);
             seenTime = info.LastWriteTimeUtc;
             seenLength = info.Length;

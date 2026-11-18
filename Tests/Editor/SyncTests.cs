@@ -240,6 +240,22 @@ namespace Scenoco.Tests
         }
 
         [Test]
+        public void WindowsLineEndings_AreReadAndKept()
+        {
+            string Crlf(string text) => text.Replace("\r\n", "\n").Replace("\n", "\r\n");
+            FromText("Windows", Crlf(Level));
+            File.WriteAllText(textPath, Crlf(Level.Replace("localPosition=\"5 0 0\"", "localPosition=\"8 0 0\"")));
+            Twins.Sync();
+            var scene = OpenScene();
+            Assert.That(Get(scene, "Wall").transform.localPosition.x, Is.EqualTo(8), Twins.Status());
+
+            Edit(Get(scene, "Wall").transform, "m_LocalPosition", p => p.vector3Value = new Vector3(9, 0, 0));
+            Save(scene);
+            Assert.That(Text, Is.EqualTo(Crlf(Level.Replace("localPosition=\"5 0 0\"", "localPosition=\"9 0 0\""))), "written back in place, with the file's line endings");
+            Assert.That(Twins.Find(textPath).Status, Is.EqualTo(TwinStatus.Synced));
+        }
+
+        [Test]
         public void EditedFile_IsAppliedToAClosedScene()
         {
             FromText("Closed", Level);

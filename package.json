@@ -1,6 +1,6 @@
 {
   "name": "com.roro.scenoco",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "displayName": "Scenoco",
   "description": "Unity scenes, prefabs and assets as readable text an agent and a person can both edit: a XAML-style format in Unity's own C# vocabulary. An attribute is an assignment a script would make — a Unity property set through its own setter, a script's serialized field — with nothing translated in between.",
   "unity": "6000.0",

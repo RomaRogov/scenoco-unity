@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.1.1] - 2026-11-18
+
+### Fixed
+- A text twin with Windows line endings (Git on Windows checks text out with them) is read as the
+  same text, and written back with them, so a checkout isn't taken for an edit.
+
 ## [0.1.0] - 2026-11-18
 
 First release.
