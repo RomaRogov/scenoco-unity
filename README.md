@@ -20,10 +20,10 @@ An attribute is an assignment a script would make: on Unity's components a C# pr
 Unity 6 or later. In the Package Manager, **+ ▸ Install package from git URL…**:
 
 ```
-https://github.com/RomaRogov/scenoco.git
+https://github.com/RomaRogov/scenoco-unity.git
 ```
 
-or in `Packages/manifest.json`, `"com.roro.scenoco": "https://github.com/RomaRogov/scenoco.git#v0.1.0"`.
+or in `Packages/manifest.json`, `"com.roro.scenoco": "https://github.com/RomaRogov/scenoco-unity.git#v0.1.0"`.
 To run its own tests, also add `"testables": ["com.roro.scenoco"]`. For an agent, `AGENTS.md` is the
 card to read before writing a scene; installed from git it's in `Library/PackageCache/com.roro.scenoco@…/`.
 
