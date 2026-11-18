@@ -1,0 +1,14 @@
+{
+    "name": "Scenoco.Tests.UGUI",
+    "rootNamespace": "Scenoco.Tests",
+    "references": ["Scenoco.Editor", "UnityEngine.TestRunner", "UnityEditor.TestRunner", "UnityEngine.UI"],
+    "includePlatforms": ["Editor"],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": true,
+    "precompiledReferences": ["nunit.framework.dll"],
+    "autoReferenced": false,
+    "defineConstraints": ["UNITY_INCLUDE_TESTS", "SCENOCO_UGUI"],
+    "versionDefines": [{ "name": "com.unity.ugui", "expression": "1.0.0", "define": "SCENOCO_UGUI" }],
+    "noEngineReferences": false
+}

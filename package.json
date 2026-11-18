@@ -1,0 +1,26 @@
+{
+  "name": "com.roro.scenoco",
+  "version": "0.1.0",
+  "displayName": "Scenoco",
+  "description": "Unity scenes, prefabs and assets as readable text an agent and a person can both edit: a XAML-style format in Unity's own C# vocabulary. An attribute is an assignment a script would make — a Unity property set through its own setter, a script's serialized field — with nothing translated in between.",
+  "unity": "6000.0",
+  "documentationUrl": "https://github.com/RomaRogov/scenoco#readme",
+  "changelogUrl": "https://github.com/RomaRogov/scenoco/blob/main/CHANGELOG.md",
+  "licensesUrl": "https://github.com/RomaRogov/scenoco/blob/main/LICENSE",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/RomaRogov/scenoco.git"
+  },
+  "keywords": [
+    "ai",
+    "agent",
+    "scene",
+    "prefab",
+    "text",
+    "serialization"
+  ],
+  "author": {
+    "name": "roro",
+    "url": "https://github.com/RomaRogov"
+  }
+}

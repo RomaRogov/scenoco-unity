@@ -1,0 +1,43 @@
+<Prefab name="Rig">
+  <GameObject name="Camera" tag="MainCamera">
+    <Transform localPosition="0 1 -10" localEulerAngles="0 0 450" />
+    <Camera allowHDR="false" orthographicSize="6.5" orthographic="true" backgroundColor="0.1 0.2 0.3" />
+  </GameObject>
+  <GameObject name="Sun">
+    <Transform localEulerAngles="50 -30 0" />
+    <Light type="Directional" intensity="1.5" shadows="Soft" shadowBias="0.2" />
+  </GameObject>
+  <GameObject name="Crate" layer="4" isStatic="true">
+    <MeshFilter sharedMesh="Library/unity default resources#Cube" />
+    <MeshRenderer shadowCastingMode="TwoSided" />
+    <BoxCollider size="1 2 1" />
+    <Rigidbody mass="5" centerOfMass="0 1 0" />
+  </GameObject>
+  <GameObject name="Sprite" m_IsActive="false">
+    <SpriteRenderer color="1 0 0 0.5" sortingOrder="3" />
+  </GameObject>
+  <GameObject name="Canvas">
+    <RectTransform anchorMin="0 0" anchorMax="0 0" anchoredPosition="540 960" sizeDelta="1080 1920" />
+    <Canvas renderMode="ScreenSpaceOverlay" />
+    <GameObject name="Bar">
+      <RectTransform anchorMin="0 1" anchorMax="1 1" sizeDelta="-40 80" pivot="0.5 1" localPosition="0 960 0" />
+    </GameObject>
+    <GameObject name="Play">
+      <RectTransform sizeDelta="120 40" />
+    </GameObject>
+  </GameObject>
+  <GameObject name="Hud">
+    <UIDocument sortingOrder="2" />
+  </GameObject>
+  <GameObject name="Door">
+    <Rigidbody2D bodyType="Static" />
+    <HingeJoint2D useMotor="true" useLimits="true">
+      <HingeJoint2D.motor>
+        <JointMotor2D motorSpeed="30" maxMotorTorque="100" />
+      </HingeJoint2D.motor>
+      <HingeJoint2D.limits>
+        <JointAngleLimits2D min="-90" max="0" />
+      </HingeJoint2D.limits>
+    </HingeJoint2D>
+  </GameObject>
+</Prefab>
