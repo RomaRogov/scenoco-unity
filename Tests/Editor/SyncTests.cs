@@ -334,5 +334,27 @@ namespace Scenoco.Tests
             Assert.That(Text, Is.EqualTo(Level.Replace("localPosition=\"5 0 0\"", "localPosition=\"7 0 0\"")));
             Assert.That(scene.isDirty, Is.False);
         }
+
+        [Test]
+        public void Describe_AnAssetOnDisk_AndImportSettings()
+        {
+            AssetDatabase.CreateAsset(new PhysicsMaterial2D { bounciness = 1, friction = 0 }, $"{Folder}/BallPhysics.physicsMaterial2D");
+            Assert.That(Files.Describe($"{Folder}/BallPhysics.physicsMaterial2D"),
+                Is.EqualTo("<Asset type=\"PhysicsMaterial2D\" name=\"BallPhysics\" bounciness=\"1\" friction=\"0\" />\n"));
+
+            // A twin keeps the order its text was written in; Describe writes serialized order. Same content:
+            static string Content(string text)
+            {
+                var root = Markup.Plain(Markup.Parse(text));
+                foreach (var e in root.DescendantsAndSelf()) e.ReplaceAttributes(e.Attributes().OrderBy(a => a.Name.LocalName).ToList());
+                return Markup.Canonical(root);
+            }
+            FromText("Described", "<Scene name=\"Described\">\n  <GameObject name=\"Ball\">\n    <Transform localPosition=\"0 3 0\" />\n    <Rigidbody2D gravityScale=\"0\" mass=\"2\" />\n  </GameObject>\n</Scene>\n");
+            Assert.That(Content(Files.Describe(scenePath)), Is.EqualTo(Content(File.ReadAllText(textPath))), "a scene as its twin says it");
+
+            File.WriteAllBytes($"{Folder}/Pixel.png", new Texture2D(1, 1).EncodeToPNG());
+            AssetDatabase.ImportAsset($"{Folder}/Pixel.png");
+            Assert.That(Files.Describe(AssetImporter.GetAtPath($"{Folder}/Pixel.png")), Does.StartWith("<Asset type=\"TextureImporter\""));
+        }
     }
 }

@@ -98,6 +98,38 @@ namespace Scenoco
             else p.SetValue(o, value);
         }
 
+        static readonly PropertyInfo DrivenProperties =
+            typeof(RectTransform).GetProperty("drivenProperties", BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public);
+
+        static readonly (string field, DrivenTransformProperties all)[] Drivable =
+        {
+            ("m_AnchoredPosition", DrivenTransformProperties.AnchoredPosition),
+            ("m_AnchorMin", DrivenTransformProperties.AnchorMin),
+            ("m_AnchorMax", DrivenTransformProperties.AnchorMax),
+            ("m_SizeDelta", DrivenTransformProperties.SizeDelta),
+            ("m_Pivot", DrivenTransformProperties.Pivot),
+            ("m_LocalRotation", DrivenTransformProperties.Rotation),
+            ("m_LocalScale", DrivenTransformProperties.Scale),
+        };
+
+        /// <summary>
+        /// The stored values Unity computes on this object instead of keeping what was set, which a file never
+        /// writes. On a RectTransform: what a Canvas or layout drives (greyed out in the Inspector, every axis
+        /// of it), and m_LocalPosition when only its x and y differ — they follow from the anchors, the anchored
+        /// position and the parent's size (a root Canvas's is the screen's), which the Inspector shows instead.
+        /// </summary>
+        public static HashSet<string> Derived(Object target, Object from)
+        {
+            var derived = new HashSet<string>();
+            if (target is not RectTransform rect) return derived;
+            if (from is not Transform baseline || Mathf.Approximately(rect.localPosition.z, baseline.localPosition.z))
+                derived.Add("m_LocalPosition");
+            var driven = DrivenProperties?.GetValue(rect) is DrivenTransformProperties d ? d : DrivenTransformProperties.None;
+            foreach (var (field, all) in Drivable)
+                if ((driven & all) == all) derived.Add(field);
+            return derived;
+        }
+
         /// <summary>A hidden field the Inspector still edits: the active checkbox in the GameObject header.</summary>
         static readonly HashSet<string> Shown = new() { "m_IsActive" };
 

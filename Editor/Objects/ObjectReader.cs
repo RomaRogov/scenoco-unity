@@ -22,7 +22,8 @@ namespace Scenoco
     //     own before its base's (a RectTransform's anchors before the localPosition derived from them).
     //   - else as the field itself, by its serialized name: a script's fields, and Unity's that no
     //     property reaches and the Inspector shows (Members.FieldNames) — a struct's differing
-    //     members only. What's left is Unity's own state, never written.
+    //     members only. What's left is Unity's own state, never written — as is what Unity
+    //     computes (Members.Derived): a RectTransform's driven values, and its localPosition.
     // ------------------------------------------------------------------------------------------
 
     public static class ObjectReader
@@ -41,8 +42,10 @@ namespace Scenoco
             }
             var their = new SerializedObject(from);
             var uncovered = new List<string>();
+            var derived = Members.Derived(target, from);
             foreach (var u in Members.Units(so))
             {
+                if (derived.Contains(u.propertyPath)) continue;
                 var d = their.FindProperty(u.propertyPath);
                 // Placed: what Unity marks overridden and isn't the prefab's value (a root's Transform is always marked).
                 if ((!placed || u.prefabOverride) && (d == null || !Members.Equal(u, d))) uncovered.Add(u.propertyPath);

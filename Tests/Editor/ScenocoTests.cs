@@ -265,13 +265,13 @@ namespace Scenoco.Tests
         [Test]
         public void Describe_AMaterial_WritesTheShadersPropertiesThatDiffer()
         {
-            var m = new Material(Shader.Find("Universal Render Pipeline/Unlit")) { name = "Glow" };
+            var m = new Material(Shader.Find("Sprites/Default")) { name = "Glow" };    // in every render pipeline
             try
             {
-                m.SetColor("_BaseColor", Color.red);
-                m.SetTextureScale("_BaseMap", new Vector2(2, 2));
+                m.SetColor("_Color", Color.red);
+                m.SetTextureScale("_MainTex", new Vector2(2, 2));
                 Assert.That(Files.Describe(m), Is.EqualTo(
-                    "<Asset type=\"Material\" name=\"Glow\" shader=\"Universal Render Pipeline/Unlit\" _BaseMap_ST=\"2 2 0 0\" _BaseColor=\"1 0 0 1\" />\n"));
+                    "<Asset type=\"Material\" name=\"Glow\" shader=\"Sprites/Default\" _MainTex_ST=\"2 2 0 0\" _Color=\"1 0 0 1\" />\n"));
             }
             finally { Object.DestroyImmediate(m); }
         }
@@ -291,21 +291,6 @@ namespace Scenoco.Tests
                     "  <Event time=\"0.5\" function=\"Step\" int=\"2\" />\n</Asset>\n"));
             }
             finally { Object.DestroyImmediate(clip); }
-        }
-
-        [Test]
-        public void Describe_AnAssetOnDisk_AndImportSettings()
-        {
-            Assert.That(Files.Describe("Assets/Materials/BallPhysics.mat"), Is.EqualTo("<Asset type=\"PhysicsMaterial2D\" name=\"BallPhysics\" bounciness=\"1\" friction=\"0\" />\n"));
-            // A twin keeps the order its text was written in; Describe writes serialized order. Same content:
-            static string Content(string text)
-            {
-                var root = Markup.Plain(Markup.Parse(text));
-                foreach (var e in root.DescendantsAndSelf()) e.ReplaceAttributes(e.Attributes().OrderBy(a => a.Name.LocalName).ToList());
-                return Markup.Canonical(root);
-            }
-            Assert.That(Content(Files.Describe("Assets/Scenes/Breakout.unity")), Is.EqualTo(Content(File.ReadAllText("Assets/Scenes/Breakout.uscene"))), "a scene as its twin says it");
-            Assert.That(Files.Describe(AssetImporter.GetAtPath("Assets/Screenshots/breakout-fast.png")), Does.StartWith("<Asset type=\"TextureImporter\""));
         }
     }
 

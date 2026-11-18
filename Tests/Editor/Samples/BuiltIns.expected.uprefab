@@ -17,10 +17,10 @@
     <SpriteRenderer color="1 0 0 0.5" sortingOrder="3" />
   </GameObject>
   <GameObject name="Canvas">
-    <RectTransform anchorMin="0 0" anchorMax="0 0" anchoredPosition="540 960" sizeDelta="1080 1920" />
+    <RectTransform />
     <Canvas renderMode="ScreenSpaceOverlay" />
     <GameObject name="Bar">
-      <RectTransform anchorMin="0 1" anchorMax="1 1" sizeDelta="-40 80" pivot="0.5 1" localPosition="0 960 0" />
+      <RectTransform anchorMin="0 1" anchorMax="1 1" sizeDelta="-40 80" pivot="0.5 1" />
     </GameObject>
     <GameObject name="Play">
       <RectTransform sizeDelta="120 40" />

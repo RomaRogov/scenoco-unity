@@ -10,6 +10,8 @@ First release.
 - Attributes are Unity's C# property names, set through their setters with Undo; scripts' serialized
   fields by name. No converters or aliases. `Transform.localEulerAngles` reads and writes the
   Inspector's rotation.
+- What Unity computes isn't written: a RectTransform's values a Canvas or layout drives, and its
+  localPosition (the anchors and anchored position say it).
 - Prefab placements write only their overrides, with removed components and children; variants via `base`.
 - `Scenoco.Files`: `Sync`, `Status`, `Track`, `Describe`, `Resolve`.
 - Value formats in one place (`ValueText`): vectors space-separated, colours `r g b [a]`, enums by
