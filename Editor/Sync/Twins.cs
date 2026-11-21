@@ -98,12 +98,20 @@ namespace Scenoco
         {
             var found = Directory.Exists("Assets")
                 ? Directory.GetFiles("Assets", "*.u*", SearchOption.AllDirectories)
-                    .Where(p => p.EndsWith(".uscene") || p.EndsWith(".uprefab")).Select(p => p.Replace('\\', '/')).ToList()
+                    .Where(p => p.EndsWith(".uscene") || p.EndsWith(".uprefab")).Select(p => p.Replace('\\', '/'))
+                    .Where(Imported).ToList()
                 : new List<string>();
             foreach (var path in found)
                 if (!twins.ContainsKey(path)) twins[path] = new Twin(path);
             foreach (var gone in twins.Keys.Except(found).ToList()) twins.Remove(gone);
         }
+
+        /// <summary>
+        /// Where Unity imports files, so a twin's asset can be: not in a folder Unity skips — one ending in ~
+        /// (Samples~, a tool's staging) or starting with a dot.
+        /// </summary>
+        static bool Imported(string path) =>
+            path.Split('/').Take(path.Count(c => c == '/')).All(folder => !folder.EndsWith("~") && !folder.StartsWith("."));
 
         static void Guard(Twin twin, Action action)
         {
@@ -118,23 +126,34 @@ namespace Scenoco
 
         // --- what agents and menus call ----------------------------------------------------------
 
-        /// <summary>Check every twin now (instead of within half a second) and report.</summary>
+        /// <summary>
+        /// Check every twin now (instead of within half a second) and report what this call did: a twin it
+        /// changed says how, one already in step says so, and one waiting on a choice still says what for.
+        /// </summary>
         public static string Sync()
         {
             Scan();
             Drain();
+            var before = twins.Values.ToDictionary(t => t, t => t.Changes);
             foreach (var twin in InOrder()) Guard(twin, () => twin.Poll(true));
             foreach (var twin in InOrder()) Guard(twin, () => twin.Poll());      // what failed for want of something that has landed now
-            return Status();
+            // A message left from an earlier sync ("created …") is not news: an untouched synced twin is in step.
+            return Report(t => t.Status == TwinStatus.Synced && before.TryGetValue(t, out var n) && n == t.Changes ? "in step" : t.Message);
         }
 
-        public static string Status()
+        /// <summary>Each twin's status, with the message of the last thing that happened to it.</summary>
+        public static string Status() => Report(t => t.Message);
+
+        static string Report(Func<Twin, string> message)
         {
             if (twins.Count == 0) Scan();
             if (twins.Count == 0) return "nothing has a text twin (Files.Track(\"Assets/….unity\" or \"….prefab\") makes one)";
             var sb = new StringBuilder();
             foreach (var t in twins.Values.OrderBy(t => t.TextPath))
-                sb.Append(t.TextPath).Append(": ").Append(t.Status).Append(t.Message.Length > 0 ? " — " + t.Message : "").Append('\n');
+            {
+                var m = message(t);
+                sb.Append(t.TextPath).Append(": ").Append(t.Status).Append(m.Length > 0 ? " — " + m : "").Append('\n');
+            }
             return sb.ToString().TrimEnd();
         }
 

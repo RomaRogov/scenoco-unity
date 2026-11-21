@@ -206,6 +206,72 @@ namespace Scenoco.Tests
         }
 
         [Test]
+        public void ParticleModules_AreWrittenAsAScriptSetsThem()
+        {
+            const string text = "<Prefab name=\"Sparks\">\n" +
+                                "  <ParticleSystem>\n" +
+                                "    <ParticleSystem.main>\n" +
+                                "      <MainModule duration=\"1\" loop=\"false\" startLifetime=\"0.5\" startSpeed=\"3\" startColor=\"1 0.5 0\" simulationSpace=\"World\" playOnAwake=\"false\">\n" +
+                                "        <MainModule.startSize>\n          <MinMaxCurve mode=\"TwoConstants\" constantMin=\"0.1\" constantMax=\"0.3\" />\n        </MainModule.startSize>\n" +
+                                "      </MainModule>\n" +
+                                "    </ParticleSystem.main>\n" +
+                                "    <ParticleSystem.emission>\n" +
+                                "      <EmissionModule rateOverTime=\"0\">\n" +
+                                "        <EmissionModule.bursts>\n          <Burst time=\"0\" count=\"30\" />\n        </EmissionModule.bursts>\n" +
+                                "      </EmissionModule>\n" +
+                                "    </ParticleSystem.emission>\n" +
+                                "    <ParticleSystem.shape>\n      <ShapeModule shapeType=\"Sphere\" radius=\"0.2\" />\n    </ParticleSystem.shape>\n" +
+                                "    <ParticleSystem.colorOverLifetime>\n" +
+                                "      <ColorOverLifetimeModule enabled=\"true\">\n" +
+                                "        <ColorOverLifetimeModule.color>\n" +
+                                "          <MinMaxGradient mode=\"Gradient\">\n" +
+                                "            <MinMaxGradient.gradient>\n" +
+                                "              <Color time=\"0\" value=\"1 1 1\" />\n              <Color time=\"1\" value=\"1 0 0\" />\n" +
+                                "              <Alpha time=\"0\" value=\"1\" />\n              <Alpha time=\"1\" value=\"0\" />\n" +
+                                "            </MinMaxGradient.gradient>\n" +
+                                "          </MinMaxGradient>\n" +
+                                "        </ColorOverLifetimeModule.color>\n" +
+                                "      </ColorOverLifetimeModule>\n" +
+                                "    </ParticleSystem.colorOverLifetime>\n" +
+                                "  </ParticleSystem>\n" +
+                                "</Prefab>\n";
+            var sparks = Import<GameObject>(text).GetComponent<ParticleSystem>();
+            var main = sparks.main;
+            Assert.That(main.duration, Is.EqualTo(1));
+            Assert.That(main.loop, Is.False);
+            Assert.That(main.startLifetime.constant, Is.EqualTo(0.5f), "a MinMaxCurve written as the float it converts from");
+            Assert.That(main.startSize.mode, Is.EqualTo(ParticleSystemCurveMode.TwoConstants));
+            Assert.That(main.startSize.constantMax, Is.EqualTo(0.3f));
+            Assert.That(main.startColor.color, Is.EqualTo(new Color(1, 0.5f, 0)));
+            Assert.That(main.simulationSpace, Is.EqualTo(ParticleSystemSimulationSpace.World));
+            var bursts = new ParticleSystem.Burst[sparks.emission.burstCount];
+            sparks.emission.GetBursts(bursts);
+            Assert.That(bursts.Length, Is.EqualTo(1), "a list the module gives through SetBursts");
+            Assert.That(bursts[0].count.constant, Is.EqualTo(30));
+            Assert.That(sparks.shape.shapeType, Is.EqualTo(ParticleSystemShapeType.Sphere));
+            var fade = sparks.colorOverLifetime.color;
+            Assert.That(fade.mode, Is.EqualTo(ParticleSystemGradientMode.Gradient));
+            Assert.That(fade.gradient.Evaluate(1), Is.EqualTo(new Color(1, 0, 0, 0)), "a gradient, through MinMaxGradient's own gradient");
+
+            var exported = Files.Export(sparks.gameObject);
+            StringAssert.Contains("<Color time=\"1\" value=\"1 0 0\" />", exported);
+            StringAssert.DoesNotContain("colorMax", exported, "what a gradient doesn't use isn't written");
+            StringAssert.Contains("startLifetime=\"0.5\"", exported);
+            StringAssert.Contains("<Burst count=\"30\"", exported);
+            StringAssert.DoesNotContain("<ParticleSystem.InitialModule", exported, "nothing left to its stored fields");
+            StringAssert.DoesNotContain("<ParticleSystem.EmissionModule", exported);
+            Assert.That(Files.Export(Import<GameObject>(exported)), Is.EqualTo(exported), "and the text reads back as itself");
+        }
+
+        [Test]
+        public void ACopy_IsNotAHandle()
+        {
+            var e = Assert.Throws<ScenocoException>(() => Import<GameObject>(
+                "<Prefab name=\"Box\">\n  <Transform>\n    <Transform.localToWorldMatrix>\n      <Matrix4x4 m03=\"5\" />\n    </Transform.localToWorldMatrix>\n  </Transform>\n</Prefab>\n"));
+            StringAssert.Contains("is read-only", e.Message);
+        }
+
+        [Test]
         public void TurnedOffRenderersAndColliders_AreWritten()
         {
             // (Apart: a BoxCollider2D added next to a SpriteRenderer is sized to it by Unity's Reset.)

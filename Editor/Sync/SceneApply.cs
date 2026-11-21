@@ -101,8 +101,11 @@ namespace Scenoco
                     Place(moved, Get(c.Parent), Get(c.After), undo, label);
             }
 
-            // Everything in the asset can be referenced, written or not (a placed prefab's untouched child).
-            foreach (var go in objects.Values.Where(go => go != null).Distinct()) ctx.References.RegisterUnwritten(go);
+            // Everything in the asset can be referenced, written or not (a placed prefab's untouched child) —
+            // but not what this change removes: a name it shared with a new object is the new one's now.
+            var leaving = changes.Where(c => c.Kind == ChangeKind.RemoveObject).Select(c => Get(c.Object)).Where(go => go != null).ToList();
+            foreach (var go in objects.Values.Where(go => go != null).Distinct())
+                if (!leaving.Any(l => go.transform.IsChildOf(l.transform))) ctx.References.RegisterUnwritten(go);
             foreach (var kv in elements)
                 if (Get(kv.Key) is { } go) ctx.References.Register(go, kv.Value);
 

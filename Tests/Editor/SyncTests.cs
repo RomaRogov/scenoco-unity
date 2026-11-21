@@ -97,6 +97,26 @@ namespace Scenoco.Tests
             Assert.That(Get(scene, "Lamp").GetComponent<Light>().intensity, Is.EqualTo(2));
         }
 
+        [Test]
+        public void TextInAFolderUnitySkips_IsNoTwin()
+        {
+            Directory.CreateDirectory($"{Folder}/Staged~");
+            File.WriteAllText($"{Folder}/Staged~/Crate.uprefab", "<Prefab name=\"Crate\" />\n");
+            Twins.Sync();
+            Assert.That(Twins.Find($"{Folder}/Staged~/Crate.uprefab"), Is.Null, "a folder ending in ~ isn't imported, so it holds no twin");
+            Assert.That(File.Exists($"{Folder}/Staged~/Crate.prefab"), Is.False);
+        }
+
+        [Test]
+        public void ASyncReportsWhatItDid_NotWhatWasDoneBefore()
+        {
+            File.WriteAllText($"{Folder}/Again.uscene", Level);
+            Assert.That(Twins.Sync(), Does.Contain("Again.uscene: Synced — created"));
+            var again = Twins.Sync().Split('\n').Single(l => l.Contains("Again.uscene:"));
+            Assert.That(again, Does.EndWith("Again.uscene: Synced — in step"));
+            Assert.That(Twins.Status(), Does.Contain("Again.uscene: Synced — created"), "the status keeps the last thing that happened");
+        }
+
         // --- the document ---------------------------------------------------------------------------
 
         [Test]

@@ -98,6 +98,97 @@ namespace Scenoco
                 uncovered.RemoveAll(changed.Contains);
                 Property(c.p, c.mine, c.theirs, into, ctx);
             }
+            if (uncovered.Count > 0) Handles(target, so, from, written, uncovered, into, ctx);
+        }
+
+        /// <summary>
+        /// What's left, under a handle's members (a ParticleSystem's main.duration): each member that differs is set
+        /// on the scratch copy's handle, as the writer will set it, and written when it stores this object's values.
+        /// A struct member is then written short where its short form stores the same (startSize="2").
+        /// </summary>
+        static void Handles(Object target, SerializedObject so, Object from, List<(PropertyInfo p, object value)> written, List<string> uncovered, XElement into, ExportContext ctx)
+        {
+            var type = target.GetType();
+            var kept = new List<(PropertyInfo h, StructuredValues.Member m, object value)>();
+            Object scratch = null;
+            Object Scratch()
+            {
+                if (scratch != null) return scratch;
+                scratch = Defaults.Scratch(type, from);
+                foreach (var (p, value) in written) Members.TrySet(p, scratch, value);
+                foreach (var (h, m, value) in kept) SetMember(h, m, scratch, value);
+                return scratch;
+            }
+            foreach (var h in Members.Handles(type))
+            {
+                if (uncovered.Count == 0) break;
+                var mine = Members.Get(h, target, out var failed);
+                if (failed) continue;
+                var item = new XElement(h.PropertyType.Name);
+                foreach (var m in StructuredValues.Members(h.PropertyType))
+                {
+                    if (uncovered.Count == 0) break;
+                    if (!StructuredValues.TryGet(m, mine, out var value)) continue;
+                    var s = Scratch();
+                    var theirs = Members.Get(h, s, out failed);
+                    if (failed || !StructuredValues.TryGet(m, theirs, out var baseline)) continue;
+                    // What a handle gives can be the object's own (a module's Gradient): kept apart from what's tried next.
+                    value = StructuredValues.Detach(value, m.Type);
+                    baseline = StructuredValues.Detach(baseline, m.Type);
+                    if (Members.Same(value, baseline)) continue;
+                    var before = new SerializedObject(s);
+                    List<string> changed = null;
+                    // A value that didn't store this object's leaves the copy as it was before, for the next one to try:
+                    // a mode ignores what it doesn't use (a gradient, the colour an earlier try set).
+                    var spoilt = false;
+                    bool Stores(object v)
+                    {
+                        if (spoilt)
+                        {
+                            scratch = null;
+                            Scratch();
+                        }
+                        spoilt = true;
+                        if (!SetMember(h, m, s, v)) return false;
+                        var after = new SerializedObject(s);
+                        changed = Members.Changed(before, after);
+                        spoilt = !(changed.Any(uncovered.Contains) && !changed.Any(Members.Structure.Contains)
+                                   && changed.All(path => so.FindProperty(path) is { } p && Members.Equal(p, after.FindProperty(path))));
+                        return !spoilt;
+                    }
+                    if (!Stores(value))
+                    {
+                        scratch = null;                                       // undone by starting again
+                        continue;
+                    }
+                    // A shorter value stores the same when everything the whole value reached is still this object's.
+                    var reached = changed;
+                    bool StoresAll(object v) => Stores(v) && new SerializedObject(s) is var now
+                                                && reached.All(path => so.FindProperty(path) is { } p && Members.Equal(p, now.FindProperty(path)));
+                    // A struct member is written whole, onto a new one, as the writer builds it.
+                    var fresh = m.Type.IsValueType && !ValueText.IsText(m.Type) ? System.Activator.CreateInstance(m.Type) : null;
+                    var shortened = StructuredValues.Shorten(value, m.Type, StoresAll, fresh);
+                    if (!StoresAll(shortened)) Stores(shortened = value);
+                    kept.Add((h, m, shortened));
+                    uncovered.RemoveAll(reached.Contains);
+                    StructuredValues.AddMember(item, m, shortened, fresh, ctx);
+                }
+                if (item.HasAttributes || item.HasElements) into.Add(new XElement($"{into.Name}.{h.Name}", item));
+            }
+        }
+
+        /// <summary>Set one member through an object's handle, with Unity's log quiet; false when it throws.</summary>
+        static bool SetMember(PropertyInfo h, StructuredValues.Member m, Object o, object value)
+        {
+            var logging = UnityEngine.Debug.unityLogger.logEnabled;
+            UnityEngine.Debug.unityLogger.logEnabled = false;
+            try
+            {
+                m.Set(Members.GetValue(h, o), value);
+                return true;
+            }
+            catch { return false; }
+            finally { UnityEngine.Debug.unityLogger.logEnabled = logging; }
         }
 
         /// <summary>m_ and the name capitalized: how Unity names the field a property stores, when it's stored as itself.</summary>

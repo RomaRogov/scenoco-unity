@@ -84,6 +84,34 @@ namespace Scenoco
 
         public static PropertyInfo Property(Type t, string name) => Properties(t).FirstOrDefault(p => p.Name == name);
 
+        static readonly Dictionary<Type, List<PropertyInfo>> handles = new();
+
+        /// <summary>
+        /// A Unity type's read-only properties whose value is a struct with members to set: a ParticleSystem's
+        /// modules (main, emission, shape…). A script writes `var main = ps.main; main.duration = 2;` — the struct
+        /// is a handle, and setting its member sets the object. Whether a property is one isn't looked up:
+        /// the writer sees it (a copy, like Matrix4x4 localToWorldMatrix, changes nothing), and the reader keeps
+        /// a member only when setting it stores what the object stores.
+        /// </summary>
+        public static IReadOnlyList<PropertyInfo> Handles(Type t)
+        {
+            if (handles.TryGetValue(t, out var list)) return list;
+            list = new List<PropertyInfo>();
+            if (IsUnitys(t))
+                for (var b = t; b != null && b != typeof(Object) && b != typeof(Component); b = b.BaseType)
+                    foreach (var p in b.GetProperties(BindingFlags.Instance | BindingFlags.Public | BindingFlags.DeclaredOnly).OrderBy(p => p.MetadataToken))
+                    {
+                        if (p.GetSetMethod() != null || p.GetGetMethod() == null || p.GetIndexParameters().Length > 0) continue;
+                        if (p.IsDefined(typeof(ObsoleteAttribute), true)) continue;
+                        var type = p.PropertyType;
+                        if (!type.IsValueType || type.IsPrimitive || type.IsEnum || ValueText.IsText(type) || !StructuredValues.Writable(type)) continue;
+                        if (list.All(x => x.Name != p.Name)) list.Add(p);
+                    }
+            return handles[t] = list;
+        }
+
+        public static PropertyInfo Handle(Type t, string name) => Handles(t).FirstOrDefault(p => p.Name == name);
+
         /// <summary>Transform.localEulerAngles: read and set as the Inspector's rotation.</summary>
         public static readonly PropertyInfo InspectorRotation = typeof(Transform).GetProperty(nameof(Transform.localEulerAngles));
 
@@ -164,7 +192,8 @@ namespace Scenoco
 
         /// <summary>Every name an element of this object can write: its properties (Unity's types), then its fields.</summary>
         public static IEnumerable<string> Names(Object o) =>
-            Properties(o.GetType()).Select(p => p.Name).Concat(FieldNames(new SerializedObject(o)).Where(n => Property(o.GetType(), n) == null));
+            Properties(o.GetType()).Select(p => p.Name).Concat(Handles(o.GetType()).Select(p => p.Name))
+                .Concat(FieldNames(new SerializedObject(o)).Where(n => Property(o.GetType(), n) == null));
 
         /// <summary>
         /// An object's stored values, one per value: a field, or each member of a field that's a struct
@@ -185,7 +214,7 @@ namespace Scenoco
                 return;
             }
             var it = p.Copy();
-            var end = p.GetEndProperty();
+            var end = p.GetEndProperty(true); // hidden ones count: Next(true) visits them
             if (!it.Next(true)) return;
             while (!SerializedProperty.EqualContents(it, end))
             {

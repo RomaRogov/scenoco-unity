@@ -168,14 +168,29 @@ namespace Scenoco
         static string ItemName(SerializedProperty item)
         {
             if (item.propertyType == SerializedPropertyType.ManagedReference)
-                return item.managedReferenceValue?.GetType().Name ?? "null";
-            return FieldTypes.Of(item)?.Name ?? item.type;
+                return XmlName(item.managedReferenceValue?.GetType().Name ?? "null");
+            return XmlName(FieldTypes.Of(item)?.Name ?? item.type);
+        }
+
+        /// <summary>
+        /// A type's name as an element's: a generic one without its arity (`SplineDataKeyValuePair`1` is
+        /// `SplineDataKeyValuePair`), and what XML can't hold in a name (`PPtr&lt;$Object&gt;`) as `_`. An item's
+        /// element is read back by its place in the list, so the name only has to be readable.
+        /// </summary>
+        internal static string XmlName(string name)
+        {
+            var tick = name.IndexOf('`');
+            if (tick > 0) name = name.Substring(0, tick);
+            name = System.Text.RegularExpressions.Regex.Replace(name, @"[^\w.-]", "_");
+            return name.Length == 0 || !(char.IsLetter(name[0]) || name[0] == '_') ? "_" + name : name;
         }
 
         static System.Collections.Generic.IEnumerable<SerializedProperty> Children(SerializedProperty owner)
         {
             var it = owner.Copy();
-            var end = owner.GetEndProperty();
+            // Hidden properties count: Next(true) visits them, and an end that skips one ([HideInInspector]
+            // Spline.m_MetaData after the last knot) would read it as the owner's own field.
+            var end = owner.GetEndProperty(true);
             if (!it.Next(true)) yield break;
             while (!SerializedProperty.EqualContents(it, end))
             {
@@ -204,15 +219,226 @@ namespace Scenoco
             return writable[t] = ok;
         }
 
-        /// <summary>A struct's public fields and settable properties that can be written.</summary>
-        static System.Collections.Generic.IEnumerable<(string name, Type type, Func<object, object> get, Action<object, object> set)> Members(Type t)
+        /// <summary>
+        /// A member of a struct as the text names it: a public field, a settable property, or a list the type
+        /// gives through Get{Names}(T[]), Set{Names}(T[]) and a {name}Count — a ParticleSystem module's bursts,
+        /// which a script sets with SetBursts.
+        /// </summary>
+        public readonly struct Member
+        {
+            public readonly string Name;
+            public readonly Type Type;
+            public readonly Func<object, object> Get;
+            public readonly Action<object, object> Set;
+
+            public Member(string name, Type type, Func<object, object> get, Action<object, object> set)
+            {
+                Name = name;
+                Type = type;
+                Get = get;
+                Set = set;
+            }
+        }
+
+        static readonly System.Collections.Generic.Dictionary<Type, Member[]> members = new();
+
+        /// <summary>A struct's members that can be written, in declaration order: fields, properties, then lists given by methods.</summary>
+        public static Member[] Members(Type t)
+        {
+            if (members.TryGetValue(t, out var known)) return known;
+            members[t] = Array.Empty<Member>();                                       // while deciding: no cycles
+            return members[t] = Find(t).ToArray();
+        }
+
+        static System.Collections.Generic.IEnumerable<Member> Find(Type t)
         {
             const System.Reflection.BindingFlags Public = System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public;
             foreach (var f in t.GetFields(Public).OrderBy(f => f.MetadataToken))
-                if (!f.IsInitOnly && ValueText.Writable(f.FieldType)) yield return (f.Name, f.FieldType, f.GetValue, f.SetValue);
+                if (!f.IsInitOnly && ValueText.Writable(f.FieldType)) yield return new Member(f.Name, f.FieldType, f.GetValue, f.SetValue);
             foreach (var p in t.GetProperties(Public).OrderBy(p => p.MetadataToken))
                 if (p.GetGetMethod() != null && p.GetSetMethod() != null && p.GetIndexParameters().Length == 0 && !p.IsDefined(typeof(ObsoleteAttribute), true) && ValueText.Writable(p.PropertyType))
-                    yield return (p.Name, p.PropertyType, p.GetValue, p.SetValue);
+                    yield return new Member(p.Name, p.PropertyType, p.GetValue, p.SetValue);
+            foreach (var set in t.GetMethods(Public).OrderBy(m => m.MetadataToken))
+            {
+                var parameters = set.GetParameters();
+                if (!set.Name.StartsWith("Set") || set.Name.Length < 5 || set.ReturnType != typeof(void) || parameters.Length != 1 || !parameters[0].ParameterType.IsArray) continue;
+                var list = parameters[0].ParameterType;
+                var plural = set.Name.Substring(3);                                   // Bursts
+                if (!plural.EndsWith("s") || set.IsDefined(typeof(ObsoleteAttribute), true)) continue;
+                var get = t.GetMethod("Get" + plural, Public, null, new[] { list }, null);
+                var count = t.GetProperty(Lower(plural.Substring(0, plural.Length - 1)) + "Count", Public);
+                if (get == null || count?.GetGetMethod() == null || !ValueText.Writable(list)) continue;
+                var element = list.GetElementType();
+                yield return new Member(Lower(plural), list,
+                    o =>
+                    {
+                        var items = Array.CreateInstance(element, Convert.ToInt32(count.GetValue(o)));
+                        get.Invoke(o, new object[] { items });
+                        return items;
+                    },
+                    (o, v) => set.Invoke(o, new[] { v }));
+            }
+        }
+
+        static string Lower(string s) => char.ToLowerInvariant(s[0]) + s.Substring(1);
+
+        /// <summary>A struct's member by name: its Member, or null.</summary>
+        public static Member? MemberOf(Type t, string name)
+        {
+            foreach (var m in Members(t)) if (m.Name == name) return m;
+            return null;
+        }
+
+        // --- short forms: a struct written as one value it converts from (MinMaxCurve from a float) ----
+
+        static readonly System.Collections.Generic.Dictionary<Type, (Type from, System.Reflection.MethodInfo make, System.Reflection.PropertyInfo[] read)[]> shortForms = new();
+
+        /// <summary>
+        /// The text values a struct converts from implicitly — a MinMaxCurve from a float, a MinMaxGradient from a
+        /// Color, as a script assigns `main.startSize = 2` — each with the struct's properties of that type, which
+        /// read one back. Learned from the type's own conversion operators.
+        /// </summary>
+        static (Type from, System.Reflection.MethodInfo make, System.Reflection.PropertyInfo[] read)[] ShortForms(Type t)
+        {
+            if (shortForms.TryGetValue(t, out var known)) return known;
+            var forms = new System.Collections.Generic.List<(Type, System.Reflection.MethodInfo, System.Reflection.PropertyInfo[])>();
+            if (t.IsValueType && !ValueText.IsText(t))
+                foreach (var m in t.GetMethods(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static))
+                {
+                    if (m.Name != "op_Implicit" || m.ReturnType != t || m.GetParameters().Length != 1) continue;
+                    var from = m.GetParameters()[0].ParameterType;
+                    if (!ValueText.IsText(from) || from == t) continue;
+                    var read = t.GetProperties(System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public)
+                        .Where(p => p.PropertyType == from && p.GetGetMethod() != null && p.GetIndexParameters().Length == 0)
+                        .OrderBy(p => p.MetadataToken).ToArray();
+                    if (read.Length > 0) forms.Add((from, m, read));
+                }
+            return shortForms[t] = forms.ToArray();
+        }
+
+        /// <summary>Whether a value is exactly what its short form makes, and that short value.</summary>
+        public static bool IsShort(object v, Type t, out object value, out Type type)
+        {
+            foreach (var (from, make, read) in ShortForms(t))
+                foreach (var p in read)
+                {
+                    var s = p.GetValue(v);
+                    if (!Equals(make.Invoke(null, new[] { s }), v)) continue;
+                    value = s;
+                    type = from;
+                    return true;
+                }
+            value = null;
+            type = null;
+            return false;
+        }
+
+        /// <summary>
+        /// The value with each part that has a short form replaced by it wherever <paramref name="same"/> says the
+        /// replacement stores the same — the item's MinMaxCurve that is a constant becomes that constant. What a
+        /// short form can't say (two constants, a curve) is kept whole.
+        /// </summary>
+        /// <param name="start">What the value is written onto — the baseline the text leaves out, or a new one for a list's
+        /// item: a member that stores the same at start's value (one Unity clamps anyway, one a mode leaves unused) is
+        /// left at it, and so out of the text.</param>
+        public static object Shorten(object v, Type t, Func<object, bool> same, object start = null)
+        {
+            if (v == null || ValueText.IsText(t) || IsShort(v, t, out _, out _)) return v;
+            foreach (var (_, make, read) in ShortForms(t))
+                foreach (var p in read)
+                {
+                    var candidate = make.Invoke(null, new[] { p.GetValue(v) });
+                    if (same(candidate)) return candidate;
+                }
+            var element = FieldTypes.ElementOf(t);
+            if (element != null && element != t && v is Array array)
+            {
+                var copy = (Array)array.Clone();
+                for (var i = 0; i < copy.Length; i++)
+                {
+                    var at = i;
+                    copy.SetValue(Shorten(copy.GetValue(i), element, x =>
+                    {
+                        var tried = (Array)copy.Clone();
+                        tried.SetValue(x, at);
+                        return same(tried);
+                    }, element.IsValueType ? Activator.CreateInstance(element) : null), i);
+                }
+                return copy;
+            }
+            if (!t.IsValueType || t.IsPrimitive || t.IsEnum) return v;
+            var shortened = Copy(v);
+            // A member set to a value its setter refuses (a Burst's repeatInterval of 0) is no shorter.
+            bool Same(Member m, object x)
+            {
+                var tried = Copy(shortened);
+                try { m.Set(tried, x); }
+                catch (Exception ex) when (ex is ArgumentException or System.Reflection.TargetInvocationException) { return false; }
+                return same(tried);
+            }
+            if (start != null)
+                foreach (var m in Members(t))
+                    if (TryGet(m, shortened, out var mine) && TryGet(m, start, out var initial) && !global::Scenoco.Members.Same(mine, initial) && Same(m, initial))
+                        m.Set(shortened, initial);
+            foreach (var m in Members(t))
+            {
+                if (ValueText.IsText(m.Type) || !TryGet(m, shortened, out var mine)) continue;
+                var member = m;
+                var shorter = Shorten(mine, m.Type, x => Same(member, x), start != null && TryGet(m, start, out var under) ? under : null);
+                if (!ReferenceEquals(shorter, mine)) m.Set(shortened, shorter);
+            }
+            return shortened;
+        }
+
+        /// <summary>
+        /// A value read through a handle, detached from the object: a module's getter hands out the system's own
+        /// Gradient and AnimationCurve, which change when the object does. Structs and lists copied, those copied anew.
+        /// </summary>
+        public static object Detach(object v, Type t)
+        {
+            switch (v)
+            {
+                case null: return null;
+                case Gradient g:
+                    var gradient = new Gradient { mode = g.mode, colorSpace = g.colorSpace };
+                    gradient.SetKeys(g.colorKeys, g.alphaKeys);
+                    return gradient;
+                case AnimationCurve c:
+                    return new AnimationCurve(c.keys) { preWrapMode = c.preWrapMode, postWrapMode = c.postWrapMode };
+                case Array a:
+                    var items = (Array)a.Clone();
+                    var element = t.GetElementType() ?? typeof(object);
+                    for (var i = 0; i < items.Length; i++) items.SetValue(Detach(items.GetValue(i), element), i);
+                    return items;
+            }
+            if (!t.IsValueType || t.IsPrimitive || t.IsEnum || ValueText.IsText(t)) return v;
+            var copy = Copy(v);
+            foreach (var m in Members(t))
+                if (!ValueText.IsText(m.Type) && TryGet(m, copy, out var member))
+                    try { m.Set(copy, Detach(member, m.Type)); }
+                    catch { /* left as read */ }
+            return copy;
+        }
+
+        /// <summary>A boxed copy of a struct.</summary>
+        static object Copy(object v) => System.Runtime.CompilerServices.RuntimeHelpers.GetObjectValue(v);
+
+        /// <summary>A member's value, or false when its getter throws (a module's member that doesn't apply).</summary>
+        public static bool TryGet(Member m, object of, out object value)
+        {
+            var logging = Debug.unityLogger.logEnabled;
+            Debug.unityLogger.logEnabled = false;
+            try
+            {
+                value = m.Get(of);
+                return true;
+            }
+            catch
+            {
+                value = null;
+                return false;
+            }
+            finally { Debug.unityLogger.logEnabled = logging; }
         }
 
         /// <summary>A property element → the value it describes, starting from <paramref name="current"/> (what the property holds now).</summary>
@@ -247,23 +473,40 @@ namespace Scenoco
             }
             if (e.Tag() != t.Name) throw new ScenocoException(e, $"<{e.Name}> where a {t.Name} goes: write <{t.Name} … />");
             if (!t.IsValueType) return Write(t, null, new XElement("item", e), ctx);
+            // Members are set on the boxed value in the order written: on a handle (a ParticleSystem's module) each one sets the object.
             var boxed = current ?? Activator.CreateInstance(t);
-            var members = Members(t).ToList();
+            var all = Members(t);
             foreach (var a in e.Attributes())
             {
-                var m = members.FirstOrDefault(x => x.name == a.Name.LocalName);
-                if (m.name == null) throw new ScenocoException((XObject)a, $"{t.Name} has no member {a.Name} — it has: {string.Join(", ", members.Select(x => x.name))}");
-                if (!ValueText.IsText(m.type)) throw new ScenocoException((XObject)a, $"{a.Name} is structured: write it as <{t.Name}.{a.Name}>");
-                m.set(boxed, Parse(a.Value, m.type, ctx, e, a));
+                var m = all.FirstOrDefault(x => x.Name == a.Name.LocalName);
+                if (m.Name == null) throw new ScenocoException((XObject)a, $"{t.Name} has no member {a.Name} — it has: {string.Join(", ", all.Select(x => x.Name))}");
+                m.Set(boxed, Short(a.Value, m.Type, ctx, e, a));
             }
             foreach (var child in e.Elements())
             {
                 var name = child.FieldIn(e) ?? throw new ScenocoException(child, $"<{child.Name}> inside <{e.Name}>: a structured member is written <{e.Name}.member>");
-                var m = members.FirstOrDefault(x => x.name == name);
-                if (m.name == null) throw new ScenocoException(child, $"{t.Name} has no member {name}");
-                m.set(boxed, Write(m.type, m.get(boxed), child, ctx));
+                var m = all.FirstOrDefault(x => x.Name == name);
+                if (m.Name == null) throw new ScenocoException(child, $"{t.Name} has no member {name}");
+                // A struct inside one is the whole value: what it doesn't write is a new one's, never what a getter
+                // happened to hold (a MinMaxGradient read in Gradient mode carries colours nothing set).
+                m.Set(boxed, Write(m.Type, null, child, ctx));
             }
             return boxed;
+        }
+
+        /// <summary>An attribute's value for a member: text, or a struct's short form (startSize="2" for a MinMaxCurve).</summary>
+        static object Short(string text, Type t, ImportContext ctx, XElement at, XAttribute attr)
+        {
+            if (ValueText.IsText(t)) return Parse(text, t, ctx, at, attr);
+            var forms = ShortForms(t);
+            if (forms.Length == 0) throw new ScenocoException((XObject)attr ?? at, $"{attr?.Name} is structured: write it as <{at.Name}.{attr?.Name}>");
+            Exception failed = null;
+            foreach (var (from, make, _) in forms)
+            {
+                try { return make.Invoke(null, new[] { ValueText.Parse(text, from, ctx, at) }); }
+                catch (Exception ex) when (ex is FormatException or OverflowException or ArgumentException) { failed = ex; }
+            }
+            throw new ScenocoException((XObject)attr ?? at, $"{attr?.Name}: {failed?.Message} — as a {string.Join(" or ", forms.Select(f => f.from.Name))}, or written as <{at.Name}.{attr?.Name}>");
         }
 
         static object Parse(string text, Type t, ImportContext ctx, XElement at, XAttribute attr)
@@ -296,15 +539,25 @@ namespace Scenoco
             var e = new XElement(t.Name);
             if (ValueText.IsText(t)) return e.Set("value", ValueText.Format(v, t, ctx));
             if (!t.IsValueType) return Read(v, null, t, t.Name, ctx);
-            baseline ??= Activator.CreateInstance(t);
+            // As the writer builds it: from the baseline (a new one for a list's item), member by member in order,
+            // so a member an earlier one already set (a Burst's maxCount, after its count) isn't written again.
+            var built = Copy(baseline ?? Activator.CreateInstance(t));
             foreach (var m in Members(t))
             {
-                var mine = m.get(v);
-                if (global::Scenoco.Members.Same(mine, m.get(baseline))) continue;
-                if (ValueText.IsText(m.type)) e.Set(m.name, ValueText.Format(mine, m.type, ctx));
-                else e.Add(Read(mine, m.get(baseline), m.type, $"{t.Name}.{m.name}", ctx));
+                if (!TryGet(m, v, out var mine) || TryGet(m, built, out var theirs) && global::Scenoco.Members.Same(mine, theirs)) continue;
+                AddMember(e, m, mine, theirs, ctx);
+                try { m.Set(built, mine); }
+                catch { /* the item is still written; only what follows may repeat */ }
             }
             return e;
+        }
+
+        /// <summary>One member into an item's element: an attribute when it's text or its short form, else a nested element.</summary>
+        public static void AddMember(XElement item, Member m, object value, object baseline, ExportContext ctx)
+        {
+            if (ValueText.IsText(m.Type)) item.Set(m.Name, ValueText.Format(value, m.Type, ctx));
+            else if (IsShort(value, m.Type, out var s, out var st)) item.Set(m.Name, ValueText.Format(s, st, ctx));
+            else item.Add(Read(value, baseline, m.Type, $"{item.Name}.{m.Name}", ctx));
         }
     }
 }

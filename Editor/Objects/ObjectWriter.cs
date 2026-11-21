@@ -73,6 +73,12 @@ namespace Scenoco
                     Set(target, p, StructuredValues.Write(p.PropertyType, Members.Get(p, target, out _), child, ctx), child, ctx, null);
                     continue;
                 }
+                if (Members.Handle(type, name) is { } h)
+                {
+                    Flush();
+                    SetHandle(target, h, child, ctx);
+                    continue;
+                }
                 fields ??= new SerializedObject(target);
                 var f = Members.Field(fields, name) ?? throw Unknown(target, name, child);
                 StructuredValues.Write(f, child, ctx);
@@ -81,6 +87,14 @@ namespace Scenoco
         }
 
         /// <summary>Set one property through its setter, and check what it stored.</summary>
+        /// <summary>
+        /// Euler angles that read differently but are the rotation already stored (355.76 and -4.24): Unity keeps
+        /// the last angles written as an editor hint, not stored, so they are no sign of runtime state.
+        /// </summary>
+        static bool SameRotation(PropertyInfo p, object a, object b) =>
+            p.Name.EndsWith("ulerAngles") && a is UnityEngine.Vector3 x && b is UnityEngine.Vector3 y
+            && UnityEngine.Quaternion.Angle(UnityEngine.Quaternion.Euler(x), UnityEngine.Quaternion.Euler(y)) < 1e-3f;
+
         public static void Set(Object target, PropertyInfo p, object value, XObject at, ImportContext ctx, string text)
         {
             var type = target.GetType();
@@ -112,7 +126,7 @@ namespace Scenoco
                 Members.SetValue(p, target, was);
                 throw new ScenocoException(at, $"{type.Name}.{p.Name} changes the hierarchy: an object's parent and children are where its element is written");
             }
-            if (stored.Count == 0 && !Members.Same(now, was))
+            if (stored.Count == 0 && !Members.Same(now, was) && !SameRotation(p, now, was))
             {
                 Members.SetValue(p, target, was);
                 throw new ScenocoException(at, $"{type.Name}.{p.Name} is runtime state: setting it changes nothing the scene or asset stores, so it wouldn't last. Set it from a script when the game runs");
@@ -124,6 +138,33 @@ namespace Scenoco
             }
             if (text != null && value is not Object && ValueText.IsText(p.PropertyType) && !Members.Same(now, value))
                 Report(ctx, at, $"{type.Name}.{p.Name}=\"{text}\" became \"{ValueText.Format(now, p.PropertyType, null)}\": Unity's setter changed it");
+        }
+
+        /// <summary>
+        /// A handle's members (a ParticleSystem's main, emission…), set one by one on what its getter returns, in
+        /// the order written, as a script sets them. A struct that is only a copy sets nothing: that's an error,
+        /// told by a member reading back other than it was set while nothing was stored.
+        /// </summary>
+        static void SetHandle(Object target, PropertyInfo h, XElement child, ImportContext ctx)
+        {
+            var type = target.GetType();
+            var before = new SerializedObject(target);
+            if (ctx.RecordUndo) Undo.RecordObject(target, "Scenoco");
+            var set = StructuredValues.Write(h.PropertyType, Members.Get(h, target, out _), child, ctx);
+            var stored = Members.Changed(before, new SerializedObject(target));
+            if (stored.Count == 0)
+            {
+                var now = Members.Get(h, target, out _);
+                var item = child.Elements().FirstOrDefault();
+                foreach (var a in item?.Attributes() ?? Enumerable.Empty<XAttribute>())
+                    if (StructuredValues.MemberOf(h.PropertyType, a.Name.LocalName) is { } m && ValueText.IsText(m.Type)
+                        && StructuredValues.TryGet(m, now, out var read) && StructuredValues.TryGet(m, set, out var wrote) && !Members.Same(read, wrote))
+                        throw new ScenocoException(child, $"{type.Name}.{h.Name} is read-only: its value is a copy, so setting its members changes nothing");
+                return;
+            }
+            if (stored.Any(Members.Structure.Contains)) throw new ScenocoException(child, $"{type.Name}.{h.Name} changes the hierarchy: an object's parent and children are where its element is written");
+            if (PrefabUtility.IsPartOfPrefabInstance(target)) PrefabUtility.RecordPrefabInstancePropertyModifications(target);
+            EditorUtility.SetDirty(target);
         }
 
         /// <summary>
@@ -149,6 +190,32 @@ namespace Scenoco
                 if (Members.Probe(type, source, p, Members.Get(p, target, out _)) is { } probe)
                     foreach (var path in probe.changed)
                         if (so.FindProperty(path) is { prefabOverride: true } overridden) PrefabUtility.RevertPropertyOverride(overridden, mode);
+                return;
+            }
+            if (Members.Handle(type, name) is { } h)
+            {
+                var mine = Members.Get(h, target, out _);
+                if (source == null)
+                {
+                    if (ctx.RecordUndo) Undo.RecordObject(target, "Scenoco");
+                    var fresh = Members.Get(h, from, out _);
+                    foreach (var m in StructuredValues.Members(h.PropertyType))
+                        if (StructuredValues.TryGet(m, fresh, out var value) && StructuredValues.TryGet(m, mine, out var now) && !Members.Same(value, now))
+                            try { m.Set(mine, value); }
+                            catch { /* a member that doesn't apply to this object */ }
+                    EditorUtility.SetDirty(target);
+                    return;
+                }
+                // Placed: the stored values the handle's members reach, as this object has them, are reverted.
+                var scratch = Defaults.Scratch(type, source);
+                var before = new SerializedObject(scratch);
+                var theirs = Members.Get(h, scratch, out _);
+                foreach (var m in StructuredValues.Members(h.PropertyType))
+                    if (StructuredValues.TryGet(m, mine, out var value))
+                        try { m.Set(theirs, value); }
+                        catch { /* as above */ }
+                foreach (var path in Members.Changed(before, new SerializedObject(scratch)))
+                    if (so.FindProperty(path) is { prefabOverride: true } overridden) PrefabUtility.RevertPropertyOverride(overridden, mode);
                 return;
             }
             var f = Members.Field(so, name) ?? throw Unknown(target, name, at);

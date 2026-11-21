@@ -141,6 +141,22 @@ attributes, one child element per item, named by the item's type:
 </Spawner>
 ```
 
+**A particle system** is set as a script sets it: each module (`main`, `emission`, `shape`,
+`colorOverLifetime`…) is a property element holding the module, whose members are its C# properties.
+A `MinMaxCurve` or `MinMaxGradient` that is one value is that value (`startSize="0.2"`,
+`startColor="1 0.5 0"`); two constants or a curve are written out. Bursts are the module's
+`SetBursts` list:
+
+```xml
+<ParticleSystem>
+  <ParticleSystem.main> <MainModule duration="1" loop="false" startLifetime="0.5" startSpeed="3" /> </ParticleSystem.main>
+  <ParticleSystem.emission>
+    <EmissionModule rateOverTime="0"> <EmissionModule.bursts> <Burst count="30" /> </EmissionModule.bursts> </EmissionModule>
+  </ParticleSystem.emission>
+  <ParticleSystem.shape> <ShapeModule shapeType="Sphere" radius="0.2" /> </ParticleSystem.shape>
+</ParticleSystem>
+```
+
 A list of single values: `<Path.points> <Vector2 value="0 1" /> </Path.points>`; of references or
 numbers, an attribute with spaces: `targets="#A #B"`. `[SerializeReference]` items are named by
 their concrete class.
@@ -195,5 +211,5 @@ writes its text, then edit that. `Files.Describe` reads any scene or prefab with
 - **A value changed in Unity comes back under another name:** a save writes what Unity stores,
   under the property named after it, in place of the name you wrote (`localRotation` you wrote
   comes back as `localEulerAngles`).
-- **A `.uscene` or `.uprefab` anywhere under `Assets/` is a twin** and creates an asset. Keep drafts
-  under another extension.
+- **A `.uscene` or `.uprefab` anywhere under `Assets/` is a twin** and creates an asset — except in a
+  folder Unity skips (ending in `~`). Keep drafts there, or under another extension.

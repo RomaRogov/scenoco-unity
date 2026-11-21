@@ -51,6 +51,9 @@ namespace Scenoco
         public TwinStatus Status { get; private set; }
         public string Message { get; private set; } = "";
 
+        /// <summary>Counts the twin's own status changes: what a report tells apart from what was already said.</summary>
+        internal int Changes { get; private set; }
+
         /// <summary>Counts every change any twin made to an asset: a twin that failed looks again when it moves.</summary>
         internal static int Progress;
 
@@ -399,6 +402,7 @@ namespace Scenoco
         {
             Status = status;
             Message = message;
+            Changes++;
             if (status == TwinStatus.Synced) loggedProblem = null;
             TwinWindow.Refresh();
             return $"{Name}: {message}";
